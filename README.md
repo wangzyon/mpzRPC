@@ -8,7 +8,7 @@
 
 mpzRPC是基于C++实现的RPC分布式网络通信框架，框架基于muduo高性能网络库、protobuf数据交换、Zookeepr服务注册中间件开发，即mpzRPC。mpzRPC在客户端隐藏了通信和连接过程，在服务端提供了简洁本地服务发布注册接口，整体高效易用。
 
-## 1.1 设计思路 
+#### 设计思路 
 
 protofbuf原生提供了基于rpc service方法调用代码框架，无需实现对服务接口的描述，只需要关注服务管理和rpc通信流程；其次，protobuf基于二进制序列化数据的，同带宽具有更高的通信效率；因此，采用protobuf为基础，整体框架初始构想如下；
 
@@ -21,7 +21,7 @@ protofbuf原生提供了基于rpc service方法调用代码框架，无需实现
 - 网络中间件：RPC请求的发送和服务调用响应的返回，需要网络中间件实现客户端和服务端的通信；
 - 通信协议：客户端调用一个远程RPC服务，需要提供服务名称、方法名称、方法输入参数，因此客户端打包这些参数和服务端解包需要提前约定一个通信协议；
 
-## 1.2 框架设计
+#### 框架设计
 
 ![](images/design.svg)
 
@@ -30,7 +30,7 @@ protofbuf原生提供了基于rpc service方法调用代码框架，无需实现
 - 网络中间件：采用muduo网络库实现通信，muduo库采用one loop per thread设计，多线程并发执行多个事件循环，每个事件循环采用非阻塞+epoll作为IO模型，性能优秀；
 - 通信协议：head_size+head_str+request_str设计，其中head_str中包含request_size信息，避免Tcp粘包；
 
-## 1.3 交互流程
+#### 交互流程
 
 1. 发布本地服务，在服务端，通过provider->publishService将本地服务封装成可被远程调用的rpc服务，并添加到服务映射表；
 2. 启动服务，provider->run启动TcpServer,并创建一个监听fd->acceptFd；将服务映射表上的RPC服务注册到ZooKeeper;
@@ -44,7 +44,7 @@ protofbuf原生提供了基于rpc service方法调用代码框架，无需实现
 
 # 2 安装
 
-## 2.1 安装依赖库
+#### 安装依赖库
 
 - [protobuf](https://github.com/protocolbuffers/protobuf)
 - [ZooKeeper](https://github.com/apache/zookeeper)
@@ -52,17 +52,12 @@ protofbuf原生提供了基于rpc service方法调用代码框架，无需实现
 - [cmake](https://github.com/Kitware/CMake)
 - [json](https://github.com/nlohmann/json)
 
-## 2.2 编译
-
-克隆
+#### 编译
 
 ```shell
+# 克隆
 git clone https://github.com/wangzyon/mpzRPC
-```
-
-编译
-
-```shell
+# 编译
 cd ./mpzRPC && sudo ./autobuild.sh
 ```
 
@@ -185,6 +180,144 @@ int main(int argc, char **argv)
     }
     return 0;
 }
+```
+
+<!-- tabs:end -->
+
+> 完整例程参考：[example](example/)
+
+# 4 关键设计
+
+#### 服务接口设计
+
+protobuf文件编译后将生成一系列C++类型，从而实现便利的接口服务；
+
+![](images/service.svg)
+
+protobuf中service标识将生成如下C++类型：
+
+| C++类            | 描述                                                         |
+| ---------------- | ------------------------------------------------------------ |
+| Service          | 服务类，服务端使用，可获取各方法的请求类型、方法的返回类型等； |
+| Service_Stub     | 服务类，客户端使用，可获取各方法的请求类型、方法的返回类型等； |
+| ServiceDescrible | 服务的描述类，记录服务的名称、服务里的方法数量、各方法的描述类等； |
+| MethodDescrible  | 方法的描述类，记录方法的名称、方法所在服务描述等；           |
+| Request          | Message类，rpc方法的输入类型；                               |
+| Response         | Message类，rpc方法的返回类型；                               |
+
+protobuf额外生成两个C++类型：
+
+| C++类      | 描述                                                |
+| ---------- | --------------------------------------------------- |
+| Controller | 手动记录rpc调用过程状态，从而查询调用过程是否成功； |
+| Closure    | 回调；                                              |
+
+RPC调用无论客户端还是服务端，核心均是调用CallMethod方法；
+
+```cpp
+// 服务端：Service->CallMethod
+// 客户端：Service_Stub->CallMethod
+
+void CallMethod(
+	const google::protobuf::MethodDescriptor *method,
+	google::protobuf::RpcController *controller,
+	const google::protobuf::Message *request,
+	google::protobuf::Message *response,
+	google::protobuf::Closure *done);
+```
+
+#### 异步日志设计
+
+写日志信息到文件使用磁盘I/O，若直接放到RPC方法调用的业务中，会影响RPC请求->RPC方法执行->RPC响应整个流程的速度，因此在Looger日志模块和RPC业务之间添加一个消息队列作为中间件，Muduo只负责向消息中间件添加日志信息，在新线程中Logger模块从消息队列读日志信息，并执行IO磁盘操作，实现了写日志和磁盘IO操作的解耦；
+
+> 异步指Muduo中业务线程不用等待日志写入文件，将日志信息添加到消息队列中，即可继续执行业务逻辑；
+
+![](images/logger.svg)
+
+- 线程安全：多个线程同时操作消息队列，因此，在队列的push和pop方法中添加mutex锁保证线程安全；
+- 线程通信：pop操作中，若消息队列为空，则一直等待，同时Muduo无法获取锁，而不能添加消息，此时造成死锁；因此，在push和pop间使用condition_variable条件变量实现线程通信，当push操作执行后，通知pop操作可以取锁执行；
+
+> 完整实现参考：[lockqueue.h](include/lockqueue.h)
+>
+> 一个功能更加强大的消息中间件：**kafka**
+
+#### 通信协议设计
+
+客户端和服务端通信，为避免粘包，需要约定一个通信协议；
+
+![](images/protocol.svg)
+
+采用protobuf定义数据包头的数据结构：
+
+```protobuf
+// protobuf版本
+syntax = "proto3"; 
+
+// 包名，在C++中表现为命名空间
+package rpcheader;
+
+message rpcheader
+{
+    bytes service_name=1;
+    bytes method_name=2;
+    uint32 request_size=3;
+}
+```
+
+header_size是一个int32_t类型值，表示header_str长度，header_str由rpcheader序列化产生，包含一个int32_t类型的request_size，即request_str长度，因此，可根据header_size和request_size确定数据包的边界，避免粘包。
+
+> 采用int32_t类型记录包头大小，而非字符串类型，例如int32_t类型表示范围2^32-1，而4字节字符串表示范围时"0"~"9999"
+
+<!-- tabs:start -->
+
+##### 打包
+
+```c++
+// 设置包头
+rpcheader::rpcheader header;
+header.set_service_name(service_name);
+header.set_method_name(method_name);
+header.set_request_size(request_str.size());
+
+// 序列化包头->header_str
+std::string header_str;
+if (!header.SerializeToString(&header_str))
+{
+	LOG_ERR("%s", "message header_str serialization failed");
+	return;
+}
+
+// 4字节int32_t类型包头大小转换为4字节字符类型
+uint32_t header_size = header_str.size();
+std::string send_str;
+send_str.insert(0, std::string((char *)&header_size, 4));
+
+// 打包
+send_str += header_str + args_str;
+```
+
+##### 解包
+
+```c++
+// 接收数据包
+std::string recv_str = buffer->retrieveAllAsString();
+// 从字符流中读取前4个字节的内容，即header_size
+uint32_t header_size = 0;
+recv_str.copy((char *)&header_size, 4, 0);
+// 根据header_size读取数据头的原始字符流，反序列化数据，得到header_str
+std::string header_str = recv_str.substr(4, header_size);
+rpcheader::rpcheader header;
+if (!header.ParseFromString(header_str))
+{
+	LOG_ERR("%s", "header str deserialization failed");
+	return;
+}
+// 反序列化包头
+std::string service_name = header.service_name();
+std::string method_name = header.method_name();
+uint32_t request_size = header.request_size();
+// 获取rpc方法参数的字符流数据，即request_str
+std::string request_str = recv_str.substr(4 + header_size, request_size);
 ```
 
 <!-- tabs:end -->
