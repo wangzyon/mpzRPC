@@ -1,0 +1,66 @@
+// protobuf版本
+syntax = "proto3"; 
+
+// 包名，在C++中表现为命名空间
+package example;
+
+// 生成service服务类的描述，默认不生成
+option cc_generic_services=true;
+
+
+// 定义数据结构（消息），1,2指字段标识号，可以理解为字段占位序号
+message ResultCode
+{
+    int32 errcode = 1;
+    bytes errmsg = 2;
+}
+
+message LoginRequest
+{
+    bytes name=1;
+    bytes pwd=2;
+}
+
+message LoginResponse
+{
+    ResultCode result=1;  // 复合message
+    bool success = 2;
+}
+
+message RegisterRequest
+{
+    uint32 id = 1;
+    bytes name = 2;
+    bytes pwd = 3;
+}
+
+message RegisterResponse
+{
+    ResultCode result = 1;
+    bool sucess = 2;
+}
+
+message GetFriendsListRequest
+{
+    uint32 userid = 1;
+}
+
+message GetFriendsListResponse
+{
+    ResultCode result = 1;
+    repeated bytes friends = 2;
+}
+
+// 定义用户模块相关RPC接口
+service UserRpcService
+{
+    rpc Login(LoginRequest) returns(LoginResponse);
+    rpc Register(RegisterRequest) returns(RegisterResponse);
+}
+
+
+// 定义好友模块相关RPC接口
+service FiendRpcService
+{
+    rpc GetFriendsList(GetFriendsListRequest) returns(GetFriendsListResponse);
+}

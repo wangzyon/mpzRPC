@@ -1,0 +1,13 @@
+// protobuf版本
+syntax = "proto3"; 
+
+// 包名，在C++中表现为命名空间
+package rpcheader;
+
+message rpcheader
+{
+    bytes service_name=1;
+    bytes method_name=2;
+    uint32 args_size=3;
+}
+
