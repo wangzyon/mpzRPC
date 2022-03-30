@@ -21,7 +21,7 @@ protofbuf原生提供了基于rpc service方法调用代码框架，无需实现
 - 网络中间件：RPC请求的发送和服务调用响应的返回，需要网络中间件实现客户端和服务端的通信；
 - 通信协议：客户端调用一个远程RPC服务，需要提供服务名称、方法名称、方法输入参数，因此客户端打包这些参数和服务端解包需要提前约定一个通信协议；
 
-#### 框架设计
+#### 设计实现
 
 ![](images/design.svg)
 
@@ -225,6 +225,26 @@ void CallMethod(
 	google::protobuf::Message *response,
 	google::protobuf::Closure *done);
 ```
+
+#### 发布服务设计
+
+发布服务指将服务端的本地服务封装成RPC服务后，记录在服务映射表的过程，当获取客户端RPC调用请求时，根据服务名称和方法名称可通过查询服务映射表获取服务和方法对象，服务映射表采用map嵌套结构如下：
+
+![](images/servicemap.svg)
+
+服务映射表C++代码设计 ：
+
+```c++
+struct ServiceInfo
+{
+	google::protobuf::Service *m_service;
+	std::unordered_map<std::string, const google::protobuf::MethodDescriptor *> m_methodmap;
+};
+
+std::unordered_map<std::string, ServiceInfo> m_servicemap;
+```
+
+> 完整实现参考：[mpzrpcprovider.cc](src/mpzrpcprovider.cc)->pulishService
 
 #### 异步日志设计
 
