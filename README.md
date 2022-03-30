@@ -1,6 +1,6 @@
 ![](images/head.png)
 
-![](https://img.shields.io/badge/build-passing-brightgreen)![](https://img.shields.io/badge/ubuntu-18.04-blue)![](https://img.shields.io/badge/protobuf-3.20-blue)![](https://img.shields.io/badge/zookeeper-3.4.10-blue)![](https://img.shields.io/badge/cmake-3.21-blue)
+![](https://img.shields.io/badge/build-passing-brightgreen) ![](https://img.shields.io/badge/ubuntu-18.04-blue) ![](https://img.shields.io/badge/protobuf-3.20-blue) ![](https://img.shields.io/badge/zookeeper-3.4.10-blue) ![](https://img.shields.io/badge/cmake-3.21-blue)
 
 
 
