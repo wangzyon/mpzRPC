@@ -1,8 +1,12 @@
-# mpzRPC - An RPC library and framework
+![](images/head.png)
 
-mpzRPC是基于C++实现的RPC分布式网络通信框架，框架基于muduo高性能网络库、protobuf数据交换、Zookeepr服务注册中间件开发，即mpzRPC。mpzRPC在客户端隐藏了通信和连接过程，在服务端提供了简洁本地服务发布注册接口，整体高效易用。
+![](https://img.shields.io/badge/build-passing-brightgreen)![](https://img.shields.io/badge/ubuntu-18.04-blue)![](https://img.shields.io/badge/protobuf-3.20-blue)![](https://img.shields.io/badge/zookeeper-3.4.10-blue)![](https://img.shields.io/badge/cmake-3.21-blue)
+
+
 
 # 1 概述
+
+mpzRPC是基于C++实现的RPC分布式网络通信框架，框架基于muduo高性能网络库、protobuf数据交换、Zookeepr服务注册中间件开发，即mpzRPC。mpzRPC在客户端隐藏了通信和连接过程，在服务端提供了简洁本地服务发布注册接口，整体高效易用。
 
 ## 1.1 设计思路 
 
@@ -50,18 +54,135 @@ protofbuf原生提供了基于rpc service方法调用代码框架，无需实现
 
 ## 2.2 编译
 
-```bash
-# 克隆
+克隆
 
+```shell
+git clone https://github.com/wangzyon/mpzRPC
+```
 
-# 编译
-cd ./mpzRPC
-./autobuild.sh
+编译
+
+```shell
+cd ./mpzRPC && sudo ./autobuild.sh
 ```
 
 # 3 使用
 
-## 3.1 服务端发布RPC服务
+<!-- tabs:start -->
 
-## 3.2 客户端调用RPC服务
+#### 定义RPC接口
 
+```protobuf
+// protobuf版本
+syntax = "proto3"; 
+// 包名，在C++中表现为命名空间
+package example;
+// 生成service服务类的描述，默认不生成
+option cc_generic_services=true;
+// 状态
+message ResultCode
+{
+    int32 errcode = 1;
+    bytes errmsg = 2;
+}
+// 请求
+message LoginRequest
+{
+    bytes name=1;
+    bytes pwd=2;
+}
+// 响应
+message LoginResponse
+{
+    ResultCode result=1;  // 复合message
+    bool success = 2;
+}
+// 定义RPC接口
+service UserRpcService
+{
+    rpc Login(LoginRequest) returns(LoginResponse);
+}
+```
+
+#### 发布RPC服务
+
+```cpp
+#include <iostream>
+#include <mpzrpc/mpzrpcapplication.h>
+#include <mpzrpc/mpzrpcprovider.h>
+#include "example.service.pb.h"
+
+class UserService : public example::UserRpcService
+{
+public:
+    
+    bool Login(const std::string &name, const std::string pwd) // 本地服务
+    {
+        std::cout << "local service: Login" << std::endl;
+        std::cout << "name:" << name << "pwd" << std::endl;
+        return pwd == "123";
+    }
+    void Login(::google::protobuf::RpcController *controller, // RPC服务
+               const ::example::LoginRequest *request,
+               ::example::LoginResponse *response,
+               ::google::protobuf::Closure *done)   
+    {
+        // 框架给业务上报了请求参数LoginRequest，应用获取相应数据做本地业务
+        std::string name = request->name();
+        std::string pwd = request->pwd();
+        // 做本地业务
+        bool ret = Login(name, pwd);
+        response->set_success(ret);
+        // 把响应写入，包括错误码、错误消息、返回值
+        example::ResultCode *result_code = response->mutable_result();
+        result_code->set_errcode(0);
+        result_code->set_errmsg("");
+        // 执行回调操作, 执行响应对象数据的序列化和网络发送（都是由框架来完成的）
+        done->Run();
+    };
+};
+
+int main(int argc, char **argv)
+{
+    MpzrpcApplication::init(argc, argv);  
+    std::cout << MpzrpcApplication::getApp().getConfig().getRpcServerIp() << std::endl;
+    MpzrpcProvider provider; 
+    provider.publishService(new UserService()); // 2.发布服务（将本地Login发布为RPC Login）
+    provider.run(); // 3.启动服务
+    return 0;
+};
+```
+
+#### 调用RPC服务
+
+```cpp
+#include <iostream>
+#include "example.service.pb.h"
+#include <mpzrpc/mpzrpcchannel.h>
+#include <mpzrpc/mpzrpcapplication.h>
+
+int main(int argc, char **argv)
+{	
+    // 1.初始化框架 
+    MpzrpcApplication::init(argc, argv); 
+    // 2.在客户端创建服务调用类对象stub
+    example::UserRpcService_Stub stub(new MpzrpcChannel()); 
+    // 3.创建RPC调用的请求对象和响应对象；
+    example::LoginRequest request;
+    request.set_name("zhang san");
+    request.set_pwd("123456");
+    example::LoginResponse response;
+    // 4.调用
+    stub.Login(nullptr, &request, &response, nullptr);
+    // 5.打印响应结果
+    if (0 == response.result().errcode())
+    {
+        std::cout << "rpc login response success:" << response.success() << std::endl;
+    }
+    else
+    {
+        std::cout << "rpc login response error : " << response.result().errmsg() << std::endl;
+    }
+    return 0;
+}
+```

@@ -32,4 +32,3 @@ int main(int argc, char **argv)
 
     return 0;
 }
-// question protobuf提供多少功能，自己框架提供的功能和protobuf功能界限？muduo是如何嵌入到框架和protobuf之间的?
